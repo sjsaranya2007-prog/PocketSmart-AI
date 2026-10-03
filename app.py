@@ -44,8 +44,8 @@ def get_current_user(request: Request):
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse(
-        "index.html",
-        {"request": request, "user": get_current_user(request)}
+        request,"index.html",
+        {"user": get_current_user(request)}
     )
 
 
@@ -86,8 +86,8 @@ async def register(
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     return templates.TemplateResponse(
-        "login.html",
-        {"request": request, "user": get_current_user(request)}
+       request, "login.html",
+        {"user": get_current_user(request)}
     )
 
 
@@ -100,13 +100,13 @@ async def login(
     user = verify_user(email.strip().lower(), password)
 
     if not user:
-        return templates.TemplateResponse(
-            "login.html",
-            {"request": request, "user": None,
-             "error": "Invalid email or password."},
-            status_code=401
-        )
-
+     return templates.TemplateResponse(
+    request,
+    "login.html",
+    {"user": None, "error": "Invalid email or password."},
+    status_code=401
+)     
+        
     response = RedirectResponse("/dashboard", status_code=303)
     response.set_cookie(
         "user_id",
@@ -147,8 +147,8 @@ async def dashboard(request: Request):
 
     history = get_history(user["id"], 5)
     return templates.TemplateResponse(
-        "dashboard.html",
-        {"request": request, "user": user, "history": history}
+       request, "dashboard.html",
+        {"user": user, "history": history}
     )
 
 
@@ -160,8 +160,8 @@ async def history_page(request: Request):
 
     history = get_history(user["id"], 50)
     return templates.TemplateResponse(
-        "history.html",
-        {"request": request, "user": user, "history": history}
+       request, "history.html",
+        {"user": user, "history": history}
     )
 
 
