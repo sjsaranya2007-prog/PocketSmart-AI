@@ -1,336 +1,752 @@
 import os
-import json
-import secrets
-import hashlib
 import sqlite3
-from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
-from dotenv import load_dotenv
-from fastapi import FastAPI, Request, Form, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-
-from database import init_db, create_user, verify_user, save_history, get_history, get_user
-
-load_dotenv()
-
-BASE_DIR = Path(__file__).resolve().parent
-SECRET_KEY = os.getenv("SECRET_KEY", "change-this-secret-key")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+from fastapi import FastAPI, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 app = FastAPI(title="PocketSmart AI")
-app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
-templates = Jinja2Templates(
-    directory=BASE_DIR / "templates",
-    cache_size=0
-)
+
+BASE_DIR = Path(__file__).resolve().parent
+DB_FILE = BASE_DIR / "pocketsmart.db"
+
+
+# ---------------- DATABASE ----------------
+
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def get_user(email, password):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT id, name, email FROM users WHERE email=? AND password=?",
+        (email, password)
+    )
+
+    user = cursor.fetchone()
+    conn.close()
+
+    return user
+
+
+def create_user(name, email, password):
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
+            (name, email, password)
+        )
+
+        conn.commit()
+        conn.close()
+        return True
+
+    except sqlite3.IntegrityError:
+        return False
+
+
 init_db()
 
-try:
-    from services.gemini_utils import generate_recommendations
-except Exception:
-    generate_recommendations = None
 
-
-def get_current_user(request: Request):
-    user_id = request.cookies.get("user_id")
-    if not user_id:
-        return None
-    return get_user(int(user_id))
-
+# ---------------- HOME PAGE ----------------
 
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    return templates.TemplateResponse(
-        request,"index.html",
-        {"user": get_current_user(request)}
-    )
+async def home():
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>PocketSmart AI</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                background: #f4f7fb;
+                margin: 0;
+                padding: 0;
+            }
 
+            .container {
+                max-width: 900px;
+                margin: 60px auto;
+                padding: 30px;
+                text-align: center;
+            }
+
+            h1 {
+                color: #222;
+                font-size: 42px;
+            }
+
+            p {
+                color: #555;
+                font-size: 18px;
+            }
+
+            .card {
+                background: white;
+                padding: 30px;
+                margin: 25px 0;
+                border-radius: 15px;
+                box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+            }
+
+            a, button {
+                display: inline-block;
+                padding: 13px 22px;
+                margin: 8px;
+                border-radius: 8px;
+                text-decoration: none;
+                border: none;
+                cursor: pointer;
+                background: #2563eb;
+                color: white;
+                font-size: 16px;
+            }
+
+            .secondary {
+                background: #64748b;
+            }
+        </style>
+    </head>
+
+    <body>
+        <div class="container">
+
+            <div class="card">
+
+                <h1>💡 PocketSmart AI</h1>
+
+                <p>
+                    Your AI-powered smart budget and planning assistant.
+                </p>
+
+                <p>
+                    Plan your home, party and jewelry budget easily.
+                </p>
+
+                <a href="/register">Create Account</a>
+
+                <a href="/login" class="secondary">Login</a>
+
+            </div>
+
+        </div>
+    </body>
+    </html>
+    """
+
+
+# ---------------- REGISTER ----------------
 
 @app.get("/register", response_class=HTMLResponse)
-async def register_page(request: Request):
-    return templates.TemplateResponse(
-        "register.html",
-        {"request": request, "user": get_current_user(request)}
-    )
+async def register_page():
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Register - PocketSmart AI</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+
+        <style>
+            body {
+                font-family: Arial;
+                background: #f4f7fb;
+            }
+
+            .box {
+                max-width: 450px;
+                margin: 60px auto;
+                background: white;
+                padding: 30px;
+                border-radius: 15px;
+                box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            }
+
+            input {
+                width: 100%;
+                padding: 12px;
+                margin: 10px 0;
+                box-sizing: border-box;
+                border: 1px solid #ccc;
+                border-radius: 7px;
+            }
+
+            button {
+                width: 100%;
+                padding: 13px;
+                background: #2563eb;
+                color: white;
+                border: none;
+                border-radius: 7px;
+                cursor: pointer;
+            }
+
+            a {
+                display: block;
+                margin-top: 20px;
+                text-align: center;
+            }
+        </style>
+    </head>
+
+    <body>
+
+        <div class="box">
+
+            <h2>Create Account</h2>
+
+            <form method="post" action="/register">
+
+                <input
+                    type="text"
+                    name="name"
+                    placeholder="Name"
+                    required
+                >
+
+                <input
+                    type="email"
+                    name="email"
+                    placeholder="Email"
+                    required
+                >
+
+                <input
+                    type="password"
+                    name="password"
+                    placeholder="Password"
+                    required
+                >
+
+                <button type="submit">
+                    Register
+                </button>
+
+            </form>
+
+            <a href="/login">
+                Already have an account? Login
+            </a>
+
+        </div>
+
+    </body>
+    </html>
+    """
 
 
 @app.post("/register")
 async def register(
-    request: Request,
     name: str = Form(...),
     email: str = Form(...),
     password: str = Form(...)
 ):
-    if len(password) < 6:
-        return templates.TemplateResponse(
-            "register.html",
-            {"request": request, "user": None,
-             "error": "Password must contain at least 6 characters."},
+
+    success = create_user(
+        name.strip(),
+        email.strip().lower(),
+        password
+    )
+
+    if not success:
+        return HTMLResponse(
+            "<h2>Email already registered.</h2>"
+            "<a href='/register'>Go Back</a>",
             status_code=400
         )
 
-    if not create_user(name.strip(), email.strip().lower(), password):
-        return templates.TemplateResponse(
-            "register.html",
-            {"request": request, "user": None,
-             "error": "Email already registered."},
-            status_code=400
-        )
+    return RedirectResponse(
+        "/login",
+        status_code=303
+    )
 
-    return RedirectResponse("/login?registered=1", status_code=303)
 
+# ---------------- LOGIN ----------------
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
-    return templates.TemplateResponse(
-       request, "login.html",
-        {"user": get_current_user(request)}
-    )
+async def login_page():
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Login - PocketSmart AI</title>
+
+        <style>
+            body {
+                font-family: Arial;
+                background: #f4f7fb;
+            }
+
+            .box {
+                max-width: 450px;
+                margin: 60px auto;
+                background: white;
+                padding: 30px;
+                border-radius: 15px;
+                box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            }
+
+            input {
+                width: 100%;
+                padding: 12px;
+                margin: 10px 0;
+                box-sizing: border-box;
+                border: 1px solid #ccc;
+                border-radius: 7px;
+            }
+
+            button {
+                width: 100%;
+                padding: 13px;
+                background: #2563eb;
+                color: white;
+                border: none;
+                border-radius: 7px;
+            }
+
+            a {
+                display: block;
+                margin-top: 20px;
+                text-align: center;
+            }
+        </style>
+    </head>
+
+    <body>
+
+        <div class="box">
+
+            <h2>Login</h2>
+
+            <form method="post" action="/login">
+
+                <input
+                    type="email"
+                    name="email"
+                    placeholder="Email"
+                    required
+                >
+
+                <input
+                    type="password"
+                    name="password"
+                    placeholder="Password"
+                    required
+                >
+
+                <button type="submit">
+                    Login
+                </button>
+
+            </form>
+
+            <a href="/register">
+                Create new account
+            </a>
+
+        </div>
+
+    </body>
+    </html>
+    """
 
 
 @app.post("/login")
 async def login(
-    request: Request,
     email: str = Form(...),
     password: str = Form(...)
 ):
-    user = verify_user(email.strip().lower(), password)
 
-    if not user:
-     return templates.TemplateResponse(
-    request,
-    "login.html",
-    {"user": None, "error": "Invalid email or password."},
-    status_code=401
-)     
-        
-    response = RedirectResponse("/dashboard", status_code=303)
-    response.set_cookie(
-        "user_id",
-        str(user["id"]),
-        httponly=True,
-        samesite="lax",
-        secure=False
+    user = get_user(
+        email.strip().lower(),
+        password
     )
-    return response
 
-
-@app.get("/logout")
-async def logout():
-    response = RedirectResponse("/", status_code=303)
-    response.delete_cookie("user_id")
-    return response
-
-
-@app.post("/token")
-async def token(email: str = Form(...), password: str = Form(...)):
-    user = verify_user(email.strip().lower(), password)
     if not user:
-        return JSONResponse({"detail": "Invalid credentials"}, status_code=401)
+        return HTMLResponse(
+            "<h2>Invalid email or password.</h2>"
+            "<a href='/login'>Try Again</a>",
+            status_code=401
+        )
 
-    token_value = secrets.token_urlsafe(32)
-    return {
-        "access_token": token_value,
-        "token_type": "bearer",
-        "user_id": user["id"]
-    }
+    response = RedirectResponse(
+        "/dashboard",
+        status_code=303
+    )
 
+    response.set_cookie(
+        key="user_id",
+        value=str(user[0]),
+        httponly=True
+    )
+
+    return response
+
+
+# ---------------- DASHBOARD ----------------
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    user = get_current_user(request)
-    if not user:
-        return RedirectResponse("/login", status_code=303)
+async def dashboard():
 
-    history = get_history(user["id"], 5)
-    return templates.TemplateResponse(
-       request, "dashboard.html",
-        {"user": user, "history": history}
-    )
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Dashboard - PocketSmart AI</title>
+
+        <style>
+            body {
+                font-family: Arial;
+                background: #f4f7fb;
+                margin: 0;
+            }
+
+            header {
+                background: #2563eb;
+                color: white;
+                padding: 20px;
+                text-align: center;
+            }
+
+            .container {
+                max-width: 900px;
+                margin: 40px auto;
+                padding: 20px;
+            }
+
+            .card {
+                background: white;
+                padding: 25px;
+                margin: 20px 0;
+                border-radius: 15px;
+                box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            }
+
+            a {
+                display: inline-block;
+                background: #2563eb;
+                color: white;
+                padding: 12px 20px;
+                margin: 5px;
+                border-radius: 7px;
+                text-decoration: none;
+            }
+        </style>
+    </head>
+
+    <body>
+
+        <header>
+            <h1>💡 PocketSmart AI Dashboard</h1>
+        </header>
+
+        <div class="container">
+
+            <div class="card">
+
+                <h2>Smart Budget Planner</h2>
+
+                <p>
+                    Choose a planner to start.
+                </p>
+
+                <a href="/home-planner">
+                    🏠 Home Planner
+                </a>
+
+                <a href="/party-planner">
+                    🎉 Party Planner
+                </a>
+
+                <a href="/jewelry-planner">
+                    💎 Jewelry Planner
+                </a>
+
+            </div>
+
+        </div>
+
+    </body>
+    </html>
+    """
 
 
-@app.get("/history", response_class=HTMLResponse)
-async def history_page(request: Request):
-    user = get_current_user(request)
-    if not user:
-        return RedirectResponse("/login", status_code=303)
+# ---------------- HOME PLANNER ----------------
 
-    history = get_history(user["id"], 50)
-    return templates.TemplateResponse(
-       request, "history.html",
-        {"user": user, "history": history}
-    )
+@app.get("/home-planner", response_class=HTMLResponse)
+async def home_planner():
+
+    return """
+    <html>
+    <head>
+        <title>Home Planner</title>
+    </head>
+
+    <body style="font-family:Arial;max-width:600px;margin:50px auto">
+
+        <h1>🏠 Home Budget Planner</h1>
+
+        <form method="post" action="/generate-home">
+
+            <p>Budget</p>
+            <input name="budget" type="number" required>
+
+            <p>Room</p>
+            <input name="room" required>
+
+            <p>Style</p>
+            <input name="style" required>
+
+            <br><br>
+
+            <button type="submit">
+                Generate Plan
+            </button>
+
+        </form>
+
+    </body>
+    </html>
+    """
 
 
-@app.get("/session-info")
-async def session_info(request: Request):
-    user = get_current_user(request)
+@app.post("/generate-home", response_class=HTMLResponse)
+async def generate_home(
+    budget: float = Form(...),
+    room: str = Form(...),
+    style: str = Form(...)
+):
+
+    return f"""
+    <html>
+    <body style="font-family:Arial;max-width:700px;margin:50px auto">
+
+        <h1>🏠 Home Plan</h1>
+
+        <h3>Budget: ₹{budget:,.2f}</h3>
+
+        <p>
+            Room: {room}
+        </p>
+
+        <p>
+            Style: {style}
+        </p>
+
+        <hr>
+
+        <h2>Suggested Budget</h2>
+
+        <p>🪑 Furniture: ₹{budget * 0.40:,.2f}</p>
+
+        <p>💡 Lighting: ₹{budget * 0.20:,.2f}</p>
+
+        <p>🎨 Decoration: ₹{budget * 0.20:,.2f}</p>
+
+        <p>📦 Extra items: ₹{budget * 0.20:,.2f}</p>
+
+        <br>
+
+        <a href="/dashboard">
+            Back to Dashboard
+        </a>
+
+    </body>
+    </html>
+    """
+
+
+# ---------------- PARTY PLANNER ----------------
+
+@app.get("/party-planner", response_class=HTMLResponse)
+async def party_planner():
+
+    return """
+    <html>
+    <body style="font-family:Arial;max-width:600px;margin:50px auto">
+
+        <h1>🎉 Party Budget Planner</h1>
+
+        <form method="post" action="/generate-party">
+
+            <p>Budget</p>
+            <input name="budget" type="number" required>
+
+            <p>Number of Guests</p>
+            <input name="guests" type="number" required>
+
+            <p>Event Type</p>
+            <input name="event_type" required>
+
+            <br><br>
+
+            <button type="submit">
+                Generate Plan
+            </button>
+
+        </form>
+
+    </body>
+    </html>
+    """
+
+
+@app.post("/generate-party", response_class=HTMLResponse)
+async def generate_party(
+    budget: float = Form(...),
+    guests: int = Form(...),
+    event_type: str = Form(...)
+):
+
+    food_budget = budget * 0.45
+    decoration_budget = budget * 0.25
+    venue_budget = budget * 0.20
+    extra_budget = budget * 0.10
+
+    return f"""
+    <html>
+    <body style="font-family:Arial;max-width:700px;margin:50px auto">
+
+        <h1>🎉 Party Plan</h1>
+
+        <h3>Event: {event_type}</h3>
+
+        <p>Guests: {guests}</p>
+
+        <p>Total Budget: ₹{budget:,.2f}</p>
+
+        <hr>
+
+        <p>🍽️ Food: ₹{food_budget:,.2f}</p>
+
+        <p>🎈 Decoration: ₹{decoration_budget:,.2f}</p>
+
+        <p>🏛️ Venue: ₹{venue_budget:,.2f}</p>
+
+        <p>📦 Extra: ₹{extra_budget:,.2f}</p>
+
+        <br>
+
+        <a href="/dashboard">
+            Back to Dashboard
+        </a>
+
+    </body>
+    </html>
+    """
+
+
+# ---------------- JEWELRY PLANNER ----------------
+
+@app.get("/jewelry-planner", response_class=HTMLResponse)
+async def jewelry_planner():
+
+    return """
+    <html>
+    <body style="font-family:Arial;max-width:600px;margin:50px auto">
+
+        <h1>💎 Jewelry Budget Planner</h1>
+
+        <form method="post" action="/generate-jewelry">
+
+            <p>Budget</p>
+            <input name="budget" type="number" required>
+
+            <p>Occasion</p>
+            <input name="occasion" required>
+
+            <p>Style</p>
+            <input name="style" required>
+
+            <br><br>
+
+            <button type="submit">
+                Generate Plan
+            </button>
+
+        </form>
+
+    </body>
+    </html>
+    """
+
+
+@app.post("/generate-jewelry", response_class=HTMLResponse)
+async def generate_jewelry(
+    budget: float = Form(...),
+    occasion: str = Form(...),
+    style: str = Form(...)
+):
+
+    return f"""
+    <html>
+    <body style="font-family:Arial;max-width:700px;margin:50px auto">
+
+        <h1>💎 Jewelry Plan</h1>
+
+        <p>Occasion: {occasion}</p>
+
+        <p>Style: {style}</p>
+
+        <p>Total Budget: ₹{budget:,.2f}</p>
+
+        <hr>
+
+        <p>💍 Main Jewelry: ₹{budget * 0.60:,.2f}</p>
+
+        <p>✨ Accessories: ₹{budget * 0.20:,.2f}</p>
+
+        <p>🎁 Extra: ₹{budget * 0.20:,.2f}</p>
+
+        <br>
+
+        <a href="/dashboard">
+            Back to Dashboard
+        </a>
+
+    </body>
+    </html>
+    """
+
+
+# ---------------- HEALTH CHECK ----------------
+
+@app.get("/health")
+async def health():
     return {
-        "logged_in": user is not None,
-        "user": {"id": user["id"], "name": user["name"], "email": user["email"]}
-        if user else None
+        "status": "ok",
+        "application": "PocketSmart AI"
     }
 
 
-@app.get("/session-data")
-async def session_data(request: Request):
-    user = get_current_user(request)
-    if not user:
-        return JSONResponse({"detail": "Not logged in"}, status_code=401)
-
-    return {"user": user, "history": get_history(user["id"], 20)}
-
-
-async def run_planner(request: Request, planner: str, payload: dict, image: Optional[UploadFile] = None):
-    user = get_current_user(request)
-    if not user:
-        return JSONResponse({"detail": "Please login first."}, status_code=401)
-
-    image_bytes = None
-    image_mime = None
-
-    if image and image.filename:
-        image_bytes = await image.read()
-        image_mime = image.content_type or "image/jpeg"
-
-        if len(image_bytes) > 5 * 1024 * 1024:
-            return JSONResponse(
-                {"detail": "Image must be smaller than 5 MB."},
-                status_code=400
-            )
-
-    try:
-        result = await generate_recommendations(
-            planner=planner,
-            data=payload,
-            api_key=GEMINI_API_KEY,
-            model_name=GEMINI_MODEL,
-            image_bytes=image_bytes,
-            image_mime=image_mime,
-        )
-    except Exception as exc:
-        result = {
-            "title": f"{planner.title()} Planner Recommendations",
-            "summary": "AI service is not available. Showing a safe demo response.",
-            "budget_plan": [],
-            "recommendations": [],
-            "tips": [
-                "Add GEMINI_API_KEY to your .env file.",
-                "Check that the selected Gemini model is available for your API key."
-            ],
-            "error": str(exc)
-        }
-
-    save_history(
-        user["id"],
-        planner,
-        json.dumps(payload, ensure_ascii=False),
-        json.dumps(result, ensure_ascii=False)
-    )
-
-    return JSONResponse(result)
-
-
-@app.post("/generate-home")
-async def generate_home(
-    request: Request,
-    budget: float = Form(...),
-    room: str = Form(...),
-    style: str = Form(...),
-    lights: int = Form(0),
-    fans: int = Form(0),
-    tables: int = Form(0),
-    extras: str = Form("")
-):
-    if budget <= 0:
-        return JSONResponse({"detail": "Budget must be greater than 0."}, status_code=400)
-
-    return await run_planner(
-        request,
-        "home",
-        {
-            "budget": budget,
-            "room": room,
-            "style": style,
-            "lights": lights,
-            "fans": fans,
-            "tables": tables,
-            "extras": extras
-        }
-    )
-
-
-@app.post("/generate-party")
-async def generate_party(
-    request: Request,
-    budget: float = Form(...),
-    guests: int = Form(...),
-    event_type: str = Form(...),
-    venue: str = Form(...),
-    food: str = Form(...),
-    decoration: str = Form(...),
-    extras: str = Form("")
-):
-    if budget <= 0 or guests <= 0:
-        return JSONResponse({"detail": "Budget and guests must be greater than 0."}, status_code=400)
-
-    return await run_planner(
-        request,
-        "party",
-        {
-            "budget": budget,
-            "guests": guests,
-            "event_type": event_type,
-            "venue": venue,
-            "food": food,
-            "decoration": decoration,
-            "extras": extras
-        }
-    )
-
-
-@app.post("/generate-jewelry")
-async def generate_jewelry(
-    request: Request,
-    budget: float = Form(...),
-    occasion: str = Form(...),
-    style: str = Form(...),
-    metal: str = Form(...),
-    outfit_color: str = Form(""),
-    extras: str = Form(""),
-    image: Optional[UploadFile] = File(None)
-):
-    if budget <= 0:
-        return JSONResponse({"detail": "Budget must be greater than 0."}, status_code=400)
-
-    return await run_planner(
-        request,
-        "jewelry",
-        {
-            "budget": budget,
-            "occasion": occasion,
-            "style": style,
-            "metal": metal,
-            "outfit_color": outfit_color,
-            "extras": extras
-        },
-        image
-    )
-
-
-@app.get("/recommendations-details")
-async def recommendations_details(request: Request):
-    user = get_current_user(request)
-    if not user:
-        return JSONResponse({"detail": "Please login first."}, status_code=401)
-    return {"history": get_history(user["id"], 1)}
-
+# ---------------- RUN ----------------
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="127.0.0.1", port=8000, reload=True)
+
+    port = int(os.environ.get("PORT", 8000))
+
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=port
+    )
