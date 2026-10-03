@@ -25,7 +25,7 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 app = FastAPI(title="PocketSmart AI")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
-
+templates.env.cache = None
 init_db()
 
 try:
