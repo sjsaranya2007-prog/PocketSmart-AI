@@ -26,7 +26,7 @@ app = FastAPI(title="PocketSmart AI")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(
     directory=BASE_DIR / "templates",
-    env_options={"cache_size": 0}
+    cache_size=0
 )
 init_db()
 
